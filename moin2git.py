@@ -15,9 +15,6 @@ Arguments:
     data_dir  Path where your MoinMoin content are
     git_repo  Path to the target repo (created if it doesn't exist)
     dest_dir  Path to copy attachments (created if it doesn't exist)
-
-Options:
-    --convert-to-rst    After migrate, convert to reStructuredText
 """
 from sh import git, python, ErrorReturnCode_1
 import docopt
@@ -28,9 +25,54 @@ from datetime import datetime
 from urllib2 import unquote
 import shutil
 
+import sys
+from distutils.version import LooseVersion
+import MoinMoin
+import MoinMoin.version
+MOIN_VERSION = LooseVersion(MoinMoin.version.release)
+if MOIN_VERSION >= "1.9":
+    sys.path.append(os.path.join(os.path.dirname(MoinMoin.__file__),
+                                 'support'))
+from MoinMoin.Page import Page
+from MoinMoin import wikiutil
+
+
 __version__ = "0.1"
 PACKAGE_ROOT = os.path.abspath(os.path.dirname(__file__))
 
+
+if MOIN_VERSION >= "1.9":
+    from MoinMoin.web.contexts import ScriptContext as Request
+else:
+    from MoinMoin.request.request_cli import Request
+
+class MyRequest(Request):
+    def __init__(self, *args, **kwargs):
+        super(MyRequest, self).__init__(*args, **kwargs)
+        self._my_lines = []
+
+    def write(self, text):
+        self._my_lines += [text]
+
+    def normalizePagename(self, name):
+        return name
+
+    def normalizePageURL(self, name, url):
+        return name
+
+class MyPage(Page):
+    def __init__(self, *args, **kwargs):
+        self._my_body = None
+        if 'mybody' in kwargs:
+            self._my_body = kwargs.pop('mybody')
+        super(MyPage, self).__init__(*args, **kwargs)
+
+    def get_body(self):
+        if self._my_body is not None:
+            return self._my_body
+        else:
+            return super(MyPage, self).get_body()
+    body = property(fget=get_body, fset=Page.set_body)
 
 def _unquote(encoded):
     """
@@ -58,6 +100,32 @@ def parse_users(data_dir=None):
     return users
 
 
+def convert_rst(directory, page, body):
+    page = page.decode('utf-8')
+
+    old_cwd = os.getcwd()
+    old_sys_path = sys.path
+    os.chdir(directory)
+    sys.path = [ os.getcwd(), ] + sys.path
+
+    request = MyRequest(url=page, pagename=page)
+
+    Formatter = wikiutil.importPlugin(request.cfg, "formatter",
+                                      "text_x-rst", "Formatter")
+    formatter = Formatter(request)
+    request.formatter = formatter
+
+    page = MyPage(request, page, rev=0, formatter=formatter, mybody=body.decode('utf-8'))
+    if not page.exists():
+        raise RuntimeError("No page named %r" % ( args.page, ))
+
+    page.send_page()
+
+    os.chdir(old_cwd)
+    sys.path = old_sys_path
+
+    return u''.join(request._my_lines).encode('utf-8')
+
 def get_versions(page, users=None, data_dir=None, convert=False):
     if not data_dir:
         data_dir = arguments['<data_dir>']
@@ -72,6 +140,8 @@ def get_versions(page, users=None, data_dir=None, convert=False):
     if not log.strip():
         return versions
 
+    basedir = os.path.abspath(os.path.join(data_dir, '..', '..'))
+
     logs_entries = [l.split('\t') for l in log.split('\n')]
     for entry in logs_entries:
         if len(entry) != 9:
@@ -80,6 +150,8 @@ def get_versions(page, users=None, data_dir=None, convert=False):
             content = open(os.path.join(path, 'revisions', entry[1])).read()
         except IOError:
             continue
+
+        content = convert_rst(basedir, _unquote(page), content)
 
         date = datetime.fromtimestamp(int(entry[0][:-6]))
         comment = entry[-1]
@@ -91,24 +163,6 @@ def get_versions(page, users=None, data_dir=None, convert=False):
                          'author': "%s <%s>" % (name, email),
                          'm': comment,
                          'revision': entry[1]})
-    if not convert:
-        try:
-            convert = arguments['--convert-to-rst']
-        except NameError:
-            convert = False
-
-    if convert:
-        conversor = os.path.join(PACKAGE_ROOT, "moin2rst", "moin2rst.py")
-        basedir = os.path.abspath(os.path.join(data_dir, '..', '..'))
-        try:
-            rst = python(conversor, _unquote(page), d=basedir)
-
-            versions.append({'m': 'Converted to reStructuredText via moin2rst',
-                         'content': rst.stdout,
-                         'revision': 'Converting to rst'})
-        except ErrorReturnCode_1:
-            print("Couldn't convert %s to rst" % page)
-
 
     return versions
 
