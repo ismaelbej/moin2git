@@ -28,6 +28,7 @@ import json
 from datetime import datetime
 from urllib2 import unquote
 import shutil
+import PageConversor
 
 __version__ = "0.1"
 PACKAGE_ROOT = os.path.abspath(os.path.dirname(__file__))
@@ -92,20 +93,14 @@ def get_versions(page, users=None, data_dir=None, convert=False):
                          'author': "%s <%s>" % (name, email),
                          'm': comment,
                          'revision': entry[1]})
-    if not convert:
-        try:
-            convert = arguments['--convert-to-rst']
-        except NameError:
-            convert = False
 
     if convert:
-        conversor = os.path.join(PACKAGE_ROOT, "moin2rst", "moin2rst.py")
         basedir = os.path.abspath(os.path.join(data_dir, '..', '..'))
         try:
-            rst = python(conversor, _unquote(page), d=basedir)
+            content = PageConversor.convert(basedir, _unquote(page), versions[-1]['content'])
 
             versions.append({'m': 'Converted to reStructuredText via moin2rst',
-                         'content': rst.stdout,
+                         'content': content,
                          'revision': 'Converting to rst'})
         except ErrorReturnCode_1:
             print("Couldn't convert %s to rst" % page)
@@ -130,8 +125,15 @@ def migrate_to_git():
     root = os.path.join(data_dir, 'pages')
     pages = os.listdir(root)
     os.chdir(git_repo)
+
+    convert = False
+    try:
+        convert = arguments['--convert-to-rst']
+    except NameError:
+        pass
+
     for page in pages:
-        versions = get_versions(page, users=users, data_dir=data_dir)
+        versions = get_versions(page, users=users, data_dir=data_dir, convert=convert)
         if not versions:
             print("### ignoring %s (no revisions found)" % page)
             continue
