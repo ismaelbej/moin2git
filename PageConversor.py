@@ -1,8 +1,28 @@
 import os
 import sys
-from MoinMoin import wikiutil
-from MoinMoin.web.contexts import ScriptContext as Request
-from MoinMoin.Page import Page
+try:
+    from MoinMoin import wikiutil
+    from MoinMoin.web.contexts import ScriptContext as Request
+    from MoinMoin.Page import Page
+except:
+    class Request(object):
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class Page(object):
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def set_body(self):
+            pass
+
+    wikiutil = None
+
+
+try:
+    from pypandoc import convert_text
+except:
+    convert_text = None
 
 
 class ConversorRequest(Request):
@@ -38,7 +58,16 @@ class ConversorPage(Page):
     body = property(fget=get_body, fset=Page.set_body)
 
 
-def convert(directory, page, body):
+def convert(directory, page, body, format=''):
+    if format == '':
+        return body
+
+    if not wikiutil:
+        raise Exception('MoinMoin is required to convert wiki pages to rst')
+
+    if format != 'rst' and not convert_text:
+        raise Exception('PyPandoc is required to convert wiki pages to other format')
+
     page = page.decode('utf-8')
 
     old_cwd = os.getcwd()
@@ -53,7 +82,8 @@ def convert(directory, page, body):
     formatter = Formatter(request)
     request.formatter = formatter
 
-    resultPage = ConversorPage(request, page, rev=0, formatter=formatter, conversor_body=body.decode('utf-8'))
+    body = body.decode('utf-8')
+    resultPage = ConversorPage(request, page, rev=0, formatter=formatter, conversor_body=body)
     if not resultPage.exists():
         raise RuntimeError("No page named %r" % ( page, ))
 
@@ -62,4 +92,9 @@ def convert(directory, page, body):
     os.chdir(old_cwd)
     sys.path = old_sys_path
 
-    return u''.join(request.get_lines()).encode('utf-8')
+    content = u''.join(request.get_lines()).encode('utf-8')
+
+    if format != 'rst':
+        return convert_text(content, format, format='rst').encode('utf-8')
+    else:
+        return content

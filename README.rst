@@ -39,7 +39,7 @@ Usage
     like Waliki, Gollum or similar.
 
     Usage:
-      moin2git.py migrate <data_dir> <git_repo> [--convert-to-rst] [--users-file <users_file>]
+      moin2git.py migrate <data_dir> <git_repo> [--convert <convert>] [--format <format>] [--users-file <users_file>]
       moin2git.py users <data_dir>
       moin2git.py attachments <data_dir> <dest_dir>
 
@@ -49,7 +49,8 @@ Usage
         dest_dir  Path to copy attachments (created if it doesn't exist)
 
     Options:
-        --convert-to-rst    After migrate, convert to reStructuredText
+        --convert           Type of conversion: full: every page, last: only last page, none: no conversion
+        --format            Format used to convert pages: rst: rest, md: markdown
         --users-file        Use users_file to map wiki user to git commit author
 
 Workarounds

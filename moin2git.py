@@ -7,7 +7,7 @@ A tool to migrate the content of a MoinMoin wiki to a Git based system
 like Waliki, Gollum or similar.
 
 Usage:
-  moin2git.py migrate <data_dir> <git_repo> [--convert-to-rst] [--users-file <users_file>]
+  moin2git.py migrate <data_dir> <git_repo> [--convert <convert>] [--format <format>] [--users-file <users_file>]
   moin2git.py users <data_dir>
   moin2git.py attachments <data_dir> <dest_dir>
 
@@ -17,7 +17,8 @@ Arguments:
     dest_dir  Path to copy attachments (created if it doesn't exist)
 
 Options:
-    --convert-to-rst    After migrate, convert to reStructuredText
+    --convert           Type of conversion: full: every page, last: only last page, none: no conversion
+    --format            Format used to convert pages: rst: rest, md: markdown
     --users-file        Use users_file to map wiki user to git commit author
 """
 from sh import git, python, ErrorReturnCode_1
@@ -60,7 +61,7 @@ def parse_users(data_dir=None):
     return users
 
 
-def get_versions(page, users=None, data_dir=None, convert=False):
+def get_versions(page, users=None, data_dir=None, convert='none', format=''):
     if not data_dir:
         data_dir = arguments['<data_dir>']
     if not users:
@@ -74,12 +75,16 @@ def get_versions(page, users=None, data_dir=None, convert=False):
     if not log.strip():
         return versions
 
+    basedir = os.path.abspath(os.path.join(data_dir, '..', '..'))
+
     logs_entries = [l.split('\t') for l in log.split('\n')]
     for entry in logs_entries:
         if len(entry) != 9:
             continue
         try:
             content = open(os.path.join(path, 'revisions', entry[1])).read()
+            if convert == 'full':
+                content = PageConversor.convert(basedir, _unquote(page), content, format=format)
         except IOError:
             continue
 
@@ -94,16 +99,15 @@ def get_versions(page, users=None, data_dir=None, convert=False):
                          'm': comment,
                          'revision': entry[1]})
 
-    if convert:
-        basedir = os.path.abspath(os.path.join(data_dir, '..', '..'))
+    if convert == 'last':
         try:
-            content = PageConversor.convert(basedir, _unquote(page), versions[-1]['content'])
+            content = PageConversor.convert(basedir, _unquote(page), versions[-1]['content'], format=format)
 
             versions.append({'m': 'Converted to reStructuredText via moin2rst',
                          'content': content,
                          'revision': 'Converting to rst'})
         except ErrorReturnCode_1:
-            print("Couldn't convert %s to rst" % page)
+            print("Couldn't convert %s to %s" % (page, format or 'rst'))
 
 
     return versions
@@ -126,18 +130,20 @@ def migrate_to_git():
     pages = os.listdir(root)
     os.chdir(git_repo)
 
-    convert = False
-    try:
-        convert = arguments['--convert-to-rst']
-    except NameError:
-        pass
+    convert = 'none'
+    if arguments['--convert']:
+        convert = arguments['<convert>']
+
+    format = ''
+    if arguments['--format']:
+        format = arguments['<format>']
 
     for page in pages:
-        versions = get_versions(page, users=users, data_dir=data_dir, convert=convert)
+        versions = get_versions(page, users=users, data_dir=data_dir, convert=convert, format=format)
         if not versions:
             print("### ignoring %s (no revisions found)" % page)
             continue
-        path = _unquote(page) + '.rst'
+        path = _unquote(page) + ('.rst' if format=='' else '.' + format)
         print("### Creating %s\n" % path)
         dirname, basename = os.path.split(path)
         if dirname and not os.path.exists(dirname):
